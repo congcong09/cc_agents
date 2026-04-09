@@ -1,14 +1,14 @@
 import os
-from typing import Literal, TypeAlias
+from typing import Iterator, Literal, TypeAlias
 
 from openai import OpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
 from core.exceptions import LLMException
 
-SUPPORT_PROVIDERS = Literal["openai", "deepseek", "zhipu", "qwen"]
+SUPPORT_PROVIDERS = Literal["openai", "deepseek", "zhipu", "qwen", "dashscope"]
 
-Message: TypeAlias = ChatCompletionMessageParam
+ChatMessage: TypeAlias = ChatCompletionMessageParam
 
 
 class CCAgentsLLM:
@@ -44,7 +44,9 @@ class CCAgentsLLM:
             timeout=self.timeout,
         )
 
-    def think(self, messages: list[Message], temperature: float | None = None):
+    def think(
+        self, messages: list[ChatMessage], temperature: float | None = None
+    ) -> Iterator[str]:
         print(f"🧠 正在调用 {self.model} 模型...")
         try:
             response = self._client.chat.completions.create(
@@ -67,7 +69,7 @@ class CCAgentsLLM:
             print(err_msg)
             raise LLMException(err_msg)
 
-    def invoke(self, messages: list[Message], **kwargs):
+    def invoke(self, messages: list[ChatMessage], **kwargs) -> str:
         try:
             response = self._client.chat.completions.create(
                 model=self.model or "",
@@ -85,7 +87,7 @@ class CCAgentsLLM:
         except Exception as e:
             raise LLMException(f"LLM 调用失败 {e}")
 
-    def stream_invoke(self, messages: list[Message], **kwargs):
+    def stream_invoke(self, messages: list[ChatMessage], **kwargs) -> Iterator[str]:
         try:
             response = self._client.chat.completions.create(
                 model=self.model or "",
