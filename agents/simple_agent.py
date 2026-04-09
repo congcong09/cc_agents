@@ -1,7 +1,5 @@
 from typing import Iterator
 
-from openai.resources.responses.responses import ResponsesConnection
-
 from core.agent import Agent
 from core.config import Config
 from core.llm import CCAgentsLLM
