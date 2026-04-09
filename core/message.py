@@ -9,8 +9,8 @@ MessageRole = Literal["user", "assistant", "system", "tool"]
 class Message(BaseModel):
     role: MessageRole
     content: str
-    timestamp: datetime | None = Field(default_factory=datetime.now)
-    metadata: dict[str, Any] | None = Field(default_factory=dict)
+    timestamp: datetime = Field(default_factory=datetime.now)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     def to_dict(self):
         return {

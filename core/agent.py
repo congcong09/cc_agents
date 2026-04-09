@@ -24,6 +24,19 @@ class Agent(ABC):
     def run(self, input_text: str, **kwargs) -> str:
         pass
 
+    def _prepare_messages(self, input_text: str):
+        messages = []
+
+        if self.system_prompt:
+            messages.append({"role": "system", "content": self.system_prompt})
+
+        for msg in self._history:
+            messages.append({"role": msg.role, "content": msg.content})
+
+        messages.append({"role": "user", "content": input_text})
+
+        return messages
+
     def add_message(self, message: Message):
         self._history.append(message)
 
