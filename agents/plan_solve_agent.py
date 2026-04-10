@@ -3,8 +3,8 @@ import re
 
 from core.agent import Agent
 from core.config import Config
-from core.exceptions import AgentException
 from core.llm import CCAgentsLLM, ChatMessage
+from core.message import Message
 
 DEFAULT_PLANNER_PROMPT = """
 你是一个顶级的AI规划专家。你的任务是将用户提出的复杂问题分解成一个由多个简单步骤组成的行动计划。
@@ -41,14 +41,17 @@ DEFAULT_EXECUTOR_PROMPT = """
 
 
 class Planner:
-    def __init__(self, llm_client: CCAgentsLLM):
+    def __init__(self, llm_client: CCAgentsLLM, instruction_prompt: str):
         self.name = "Planner"
         self.llm_client = llm_client
+        self.instruction_prompt = instruction_prompt
 
-    def plan(self, input_text: str, **kwargs):
-        messages: list[ChatMessage] = [{"role": "user", "content": input_text}]
+    def plan(self, input_text: str):
+        planner_prompt = self.instruction_prompt.format(question=input_text)
 
-        response = self.llm_client.invoke(messages=messages, **kwargs)
+        messages: list[ChatMessage] = [{"role": "user", "content": planner_prompt}]
+
+        response = self.llm_client.invoke(messages=messages)
 
         plan_list = self._extract_plan(response_text=response)
 
@@ -71,12 +74,37 @@ class Executor:
     def __init__(
         self,
         llm_client: CCAgentsLLM,
+        instruction_prompt: str,
     ):
         self.name = "executor"
         self.llm_client = llm_client
+        self.instruction_prompt = instruction_prompt
 
-    def execute(self, input_text: str, **kwargs):
-        pass
+    def execute(
+        self,
+        input_text: str,
+        plan: list[str],
+    ):
+
+        history = []
+        final_answer = ""
+        for idx, item in enumerate(plan, start=1):
+            print(f"🏃‍♀️ 正在执行计划第{idx}项：{item}")
+
+            executor_prompt = self.instruction_prompt.format(
+                question=input_text,
+                plan=plan,
+                history=history or "无",
+                current_step=idx,
+            )
+
+            messages: list[ChatMessage] = [{"role": "user", "content": executor_prompt}]
+
+            response = self.llm_client.invoke(messages=messages)
+            history.append(f"步骤 {idx}：{item}\n结果：{response}")
+            final_answer = response
+
+        return final_answer
 
 
 class PlanSolveAgent(Agent):
@@ -91,36 +119,36 @@ class PlanSolveAgent(Agent):
         super().__init__(name, llm, system_prompt, config)
 
         if custom_prompts:
-            self.planner_prompt = custom_prompts.get("planner", DEFAULT_PLANNER_PROMPT)
-            self.executor_prompt = custom_prompts.get(
-                "executor", DEFAULT_PLANNER_PROMPT
-            )
+            planner_prompt = custom_prompts.get("planner", DEFAULT_PLANNER_PROMPT)
+            executor_prompt = custom_prompts.get("executor", DEFAULT_PLANNER_PROMPT)
         else:
-            self.planner_prompt = DEFAULT_PLANNER_PROMPT
-            self.executor_prompt = DEFAULT_EXECUTOR_PROMPT
+            planner_prompt = DEFAULT_PLANNER_PROMPT
+            executor_prompt = DEFAULT_EXECUTOR_PROMPT
 
-        self.planner = Planner(llm_client=self.llm)
-        self.executor = Executor(llm_client=self.llm)
+        self.planner = Planner(llm_client=self.llm, instruction_prompt=planner_prompt)
+        self.executor = Executor(
+            llm_client=self.llm, instruction_prompt=executor_prompt
+        )
 
     def run(self, input_text: str, **kwargs) -> str:
         print(f"🤖 {self.name} 开始处理问题：{input}")
 
-        full_planner_prompt = self.planner_prompt.format(question=input_text)
+        plan = self.planner.plan(input_text=input_text)
 
-        plan_list = self.planner.plan(full_planner_prompt)
+        if not plan:
+            final_answer = "无法生成有效的行动任务，任务终止。"
+            print("\n--- ❌ 任务终止 ---\n")
 
-        if not plan_list:
-            raise AgentException("Planner未生成计划列表，无法继续执行")
+            self.add_message(Message(role="user", content=input_text))
+            self.add_message(Message(role="assistant", content=final_answer))
 
-        history = []
-        for idx, plan in enumerate(plan_list):
-            print(f"🏃‍♀️ 正在执行计划第{idx}项：{plan}")
-            full_executor_prompt = self.executor_prompt.format(
-                question=input_text,
-                plan_list=plan_list,
-                history=history,
-                current_step=idx + 1,
-            )
+            return final_answer
 
-            response = self.executor.execute(full_executor_prompt)
-            history.append(f"[步骤：{idx + 1}] 结果：{response}")
+        final_answer = self.executor.execute(input_text=input_text, plan=plan)
+        print("--- ✅ 任务完成 ---")
+        print(f"最终答案：{final_answer}")
+
+        self.add_message(Message(role="user", content=input_text))
+        self.add_message(Message(role="assistant", content=final_answer))
+
+        return final_answer
