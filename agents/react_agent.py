@@ -1,4 +1,6 @@
-from core import Agent, CCAgentsLLM, Config
+import re
+
+from core import Agent, CCAgentsLLM, Config, Message
 from tools import ToolRegistry
 
 DEFAULT_REACT_PROMPT = """
@@ -39,37 +41,97 @@ class ReActAgent(Agent):
         system_prompt: str | None = None,
         config: Config | None = None,
         max_steps: int = 5,
+        custom_prompt: str | None = None,
     ):
         super().__init__(name, llm, system_prompt, config)
+        self.tool_registry = tool_registry
         self.max_steps = max_steps
+        self.prompt_template = custom_prompt or DEFAULT_REACT_PROMPT
+
+        # 记录模型执行过程中输出的内容
+        self._in_process_history = []
 
     def run(self, input_text: str, max_steps: int = 3, **kwargs) -> str:
-        history = []
 
+        # 每次运行前都清空
+        self._in_process_history = []
+
+        print(f"\n🤖 {self.name} 开始执行")
         final_steps = max_steps or self.max_steps
         cur_step = 0
 
         while cur_step < final_steps:
             cur_step += 1
-            prompt = DEFAULT_REACT_PROMPT.format(
-                question=input_text, history=history or "无"
+            print(f"\n--- 🏃‍♀️ 第{cur_step} 步 ---")
+
+            tool_prompt = self.tool_registry.get_tools_description()
+            history_str = "\n".join(self._in_process_history)
+            prompt = self.prompt_template.format(
+                tools=tool_prompt,
+                question=input_text,
+                history=history_str,
             )
 
+            # 调用 LLM
             response_text = self.llm.invoke([{"role": "user", "content": prompt}])
 
-            response_data = self._extract_data(response_text)
+            thought, action = self._parse_output(response_text)
 
-            if response_data.get("error"):
-                error_msg = response_data.get("error")
-                print(f"--- ❌ 执行失败 --- \n错误：{error_msg}")
+            if thought:
+                print(f"🤔 思考：{thought}")
 
-            elif response_data.get("finish"):
-                answer = response_data.get("finish")
-                print(f"--- ✅ 执行成功 ---\n结果：{answer}")
+            if not action:
+                print("⚠️ 警告：未解析出有效的 action，流程终止")
                 break
 
-    def _extract_data(self, text: str) -> dict[str, str]:
-        if "Thought" not in text or "Action" not in text:
-            return {"error": "未找到有效的内容，终止任务"}
+            if action.startswith("Finish"):
+                final_answer = self._parse_answer(action)
+                print(f"🎉 最终答案：{final_answer}")
 
-        return {}
+                self.add_message(Message(role="user", content=prompt))
+                self.add_message(Message(role="assistant", content=final_answer))
+
+                return final_answer
+
+            tool_name, tool_input = self._parse_action(action)
+
+            if not tool_name or tool_input is None:
+                self._in_process_history.append(
+                    "Action Result: 无效的action格式，请检查！"
+                )
+                continue
+
+            print(f"行动：{tool_name}[{tool_input}]")
+
+            action_result = self.tool_registry.execute_tool(tool_name, tool_input)
+            print(f"👀 第{cur_step}步调用工具的结果为{action_result}")
+
+            self._in_process_history.append(f"Action: {action}")
+            self._in_process_history.append(f"Action Result: {action_result}")
+
+        print("⏰ 已经达到最大步数，流程终止！")
+        final_answer = "抱歉，无法在规定的步数内完成这个任务"
+
+        self.add_message(Message(role="user", content=input_text))
+        self.add_message(Message(role="assistant", content=final_answer))
+
+        return final_answer
+
+    def _parse_action(self, text: str):
+        match = re.match(r"(\w+)\[(.*)\]", text)
+        if match:
+            return match.group(1), match.group(2)
+        return None, None
+
+    def _parse_answer(self, text: str):
+        answer_match = re.match(r"\w+\[(.*)\]", text)
+        return answer_match.group(0).strip() if answer_match else ""
+
+    def _parse_output(self, text: str):
+        thought_match = re.search(r"Thought:(.*)", text)
+        action_match = re.search(r"Action:(.*)", text)
+
+        thought = thought_match.group(1).strip() if thought_match else None
+        action = action_match.group(1).strip() if action_match else None
+
+        return thought, action
