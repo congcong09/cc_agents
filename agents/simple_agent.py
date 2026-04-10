@@ -1,9 +1,6 @@
 from typing import Iterator
 
-from core.agent import Agent
-from core.config import Config
-from core.llm import CCAgentsLLM
-from core.message import Message
+from core import Agent, CCAgentsLLM, Config, Message
 
 
 class SimpleAgent(Agent):
