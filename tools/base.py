@@ -15,27 +15,27 @@ class ToolParameter(BaseModel):
 
 
 class Tool(ABC):
-    def __init__(self, name: str, description: str):
+    def __init__(self, name: str, description: str, parameters: list[ToolParameter]):
         self.name = name
         self.description = description
+        self.parameters = parameters
 
     @abstractmethod
     def run(self, parameters: dict[str, Any]) -> str:
         pass
 
-    @abstractmethod
     def get_parameters(self) -> list[ToolParameter]:
-        pass
+        return self.parameters
 
     def validate_parameters(self, parameters: dict[str, Any]) -> bool:
-        required_params = [p.name for p in self.get_parameters() if p.required]
+        required_params = [p.name for p in self.parameters if p.required]
         return all(p for p in parameters if p in required_params)
 
     def to_dict(self) -> dict:
         return {
             "name": self.name,
             "description": self.description,
-            "parameters": [param.model_dump() for param in self.get_parameters()],
+            "parameters": [param.model_dump() for param in self.parameters],
         }
 
     def __str__(self) -> str:
